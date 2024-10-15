@@ -1,0 +1,253 @@
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Converter Vistorias para Planilha Excel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        /* Estilos para o modal */
+        #loadingModal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            justify-content: center;
+            align-items: center;
+        }
+
+        #loadingModalContent {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        /* Efeito de piscar */
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
+        #loadingText {
+            animation: blink 1s infinite; /* Pisca a cada 1 segundo */
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Converter Vistorias para Planilha Excel</h1>
+
+    <!-- Formulário para carregar os PDFs -->
+    <form id="pdfForm">
+        <label for="pdfFiles">Escolha vários arquivos PDF:</label>
+        <input type="file" id="pdfFiles" accept="application/pdf" multiple required>
+        <br><br>
+        <button type="button" onclick="generateExcel()">Gerar Planilha Excel</button>
+    </form>
+
+    <!-- Área para o link de download -->
+    <br>
+    <a id="downloadLink" style="display: none;">Baixar Planilha Excel</a>
+
+    <!-- Modal para exibir enquanto gera a planilha -->
+    <div id="loadingModal">
+        <div id="loadingModalContent"><span id="loadingText">Convertendo...</span></div>
+    </div>
+
+    <script>
+        // Função para exibir o modal
+        function showLoadingModal() {
+            document.getElementById('loadingModal').style.display = 'flex';
+        }
+
+        // Função para ocultar o modal
+        function hideLoadingModal() {
+            document.getElementById('loadingModal').style.display = 'none';
+        }
+
+        // Função para extrair dados de cada PDF
+        async function extractPdfData(pdfData, fileName) {
+            const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+            let laudoNum = "", marcaModelo = [], motorNum = [];
+            let page2ConcatenatedData = ""; // Variável para armazenar dados concatenados da página 2
+            let motivoReprovaData = ""; // Variável para armazenar dado anterior ao "MOTIVO DA REPROVA:"
+            let motivoReprovaNext = ""; // Variável para armazenar dado posterior ao "MOTIVO DA REPROVA:"
+            let finalidadeData = ""; // Variável para armazenar dado anterior ao "FINALIDADE:"
+            let previousText = ""; // Armazena o texto anterior
+            let captureMotivoReprovaNext = false; // Controle para capturar o item posterior ao "MOTIVO DA REPROVA:"
+            let startConcatenation = false; // Controle para iniciar a concatenação após "ITENS REPROVADOS"
+
+            // Percorre todas as páginas do PDF
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                const textContent = await page.getTextContent();
+
+                // Remove linhas em branco e processa o texto
+                let captureLaudo = false, captureMarcaModelo = false, captureMotorNum = false;
+                let motorCounter = 0, marcaModeloCounter = 0;
+
+                textContent.items
+                    .map(item => item.str.trim()) // Remove espaços em branco das extremidades
+                    .filter(text => text !== "") // Remove linhas vazias
+                    .forEach((text, index) => {
+                        // Verifica se o texto anterior era "MOTIVO DA REPROVA:" e captura o próximo item
+                        if (captureMotivoReprovaNext) {
+                            motivoReprovaNext = text;
+                            captureMotivoReprovaNext = false; // Desativa a captura
+                        }
+
+                        // Verifica se o texto atual é "MOTIVO DA REPROVA:"
+                        if (text === "MOTIVO DA REPROVA:") {
+                            motivoReprovaData = previousText; // Captura o texto anterior
+                            captureMotivoReprovaNext = true; // Ativa a captura do próximo item
+                        }
+
+                        // Verifica se o texto atual é "FINALIDADE:"
+                        if (text === "FINALIDADE:") {
+                            finalidadeData = previousText; // Armazena o texto anterior à "FINALIDADE:"
+                        }
+
+                        // Captura o dado anterior para comparação com "MOTIVO DA REPROVA:" e "FINALIDADE:"
+                        previousText = text;
+
+                        // Captura o primeiro dado após "LAUDO Nº:"
+                        if (captureLaudo && laudoNum === "") {
+                            laudoNum = text;
+                            captureLaudo = false;
+                        }
+
+                        // Captura os dois primeiros dados após "MARCA/MODELO:"
+                        if (captureMarcaModelo && marcaModeloCounter < 2) {
+                            marcaModelo.push(text);
+                            marcaModeloCounter++;
+                            if (marcaModeloCounter === 2) {
+                                captureMarcaModelo = false;
+                            }
+                        }
+
+                        // Captura o segundo e o terceiro dados após "Nº MOTOR:"
+                        if (captureMotorNum && motorCounter < 3) {
+                            motorCounter++;
+                            if (motorCounter > 1) {
+                                motorNum.push(text);
+                            }
+                            if (motorCounter === 3) {
+                                captureMotorNum = false;
+                            }
+                        }
+
+                        // Verifica se o texto atual é "LAUDO Nº:"
+                        if (text === "LAUDO Nº:") {
+                            captureLaudo = true;
+                        }
+
+                        // Verifica se o texto atual é "MARCA/MODELO:"
+                        if (text === "MARCA/MODELO:") {
+                            captureMarcaModelo = true;
+                            marcaModeloCounter = 0;
+                        }
+
+                        // Verifica se o texto atual é "Nº MOTOR:"
+                        if (text === "Nº MOTOR:") {
+                            captureMotorNum = true;
+                            motorCounter = 0;
+                        }
+
+                        // Iniciar a concatenação dos dados da página 2 após "ITENS REPROVADOS"
+                        if (text === "ITENS REPROVADOS") {
+                            startConcatenation = true;
+                        }
+
+                        // Concatenar todos os dados após "ITENS REPROVADOS" na página 2
+                        if (pageNum === 2 && startConcatenation) {
+                            page2ConcatenatedData += text + " ";
+                        }
+                    });
+            }
+
+            // Verifica se a página 2 existe ou não e concatena os dados, se existir
+            const combinedReprovaData = (motivoReprovaData + " " + motivoReprovaNext + " " + page2ConcatenatedData).trim();
+
+            // Combina os dados extraídos em uma única linha, incluindo a informação anterior ao "FINALIDADE:" na primeira coluna
+            return [fileName, finalidadeData, laudoNum, ...marcaModelo, ...motorNum, combinedReprovaData];
+        }
+
+        // Função para gerar e baixar a planilha Excel
+        async function generateExcel() {
+            const input = document.getElementById('pdfFiles');
+            const files = input.files;
+            if (!files.length) {
+                alert("Por favor, selecione ao menos um arquivo PDF!");
+                return;
+            }
+
+            // Exibe o modal
+            showLoadingModal();
+
+            let resultData = [];
+
+            // Adiciona os nomes das colunas na primeira linha
+            resultData.push(["Lote", "Laudo", "Resultado", "Placa", "Marca/Modelo", "Chassi", "Motor", "Motivo da Reprova"]);
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                let fileName = file.name; // Pega o nome do arquivo PDF
+
+                // Remove a extensão ".pdf" do nome do arquivo
+                fileName = fileName.replace(/\.pdf$/i, ""); // Remove ".pdf" do final, case insensitive
+
+                // Lê o arquivo PDF como um ArrayBuffer
+                const fileData = await file.arrayBuffer();
+
+                // Extrai os dados do PDF
+                const extractedData = await extractPdfData(fileData, fileName);
+
+                // Adiciona os dados extraídos à matriz resultData
+                resultData.push(extractedData);
+            }
+
+            // Cria um novo workbook e uma nova sheet
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(resultData);
+            XLSX.utils.book_append_sheet(wb, ws, "Dados PDFs");
+
+            // Gera o arquivo Excel
+            const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'binary' });
+
+            // Cria um blob com os dados do Excel
+            const blob = new Blob([s2ab(wbout)], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+
+            // Exibir o link de download
+            const downloadLink = document.getElementById('downloadLink');
+            downloadLink.href = url;
+            downloadLink.download = 'dados_pdf.xlsx';
+            downloadLink.style.display = 'inline';
+            downloadLink.textContent = 'Clique aqui para baixar o arquivo Excel';
+
+            // Oculta o modal
+            hideLoadingModal();
+        }
+
+        // Função auxiliar para converter string para array buffer
+        function s2ab(s) {
+            const buf = new ArrayBuffer(s.length);
+            const view = new Uint8Array(buf);
+            for (let i = 0; i < s.length; i++) {
+                view[i] = s.charCodeAt(i) & 0xFF;
+            }
+            return buf;
+        }
+    </script>
+
+</body>
+</html>
