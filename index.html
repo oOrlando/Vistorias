@@ -85,6 +85,8 @@
             let previousText = ""; // Armazena o texto anterior
             let captureMotivoReprovaNext = false; // Controle para capturar o item posterior ao "MOTIVO DA REPROVA:"
             let startConcatenation = false; // Controle para iniciar a concatenação após "ITENS REPROVADOS"
+            let concatenatedInspectionData = ""; // Para capturar os itens entre "Resultado..." e "LACRE"
+            let startInspection = false; // Controle para captura de itens entre "Resultado..." e "LACRE"
 
             // Percorre todas as páginas do PDF
             for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
@@ -171,14 +173,33 @@
                         if (pageNum === 2 && startConcatenation) {
                             page2ConcatenatedData += text + " ";
                         }
+
+                        // Iniciar captura dos itens entre "Resultado da vistoria..." e "LACRE"
+                        if (text.includes("Resultado da vistoria dos itens obrigatórios conforme Res. Contran 466/2013 e legislação pertinente")) {
+                            startInspection = true;
+                            return; // Não incluir esse texto
+                        }
+
+                        // Parar a captura ao encontrar "LACRE"
+                        if (text.includes("LACRE")) {
+                            startInspection = false;
+                        }
+
+                        // Concatenar os dados encontrados entre "Resultado..." e "LACRE"
+                        if (startInspection) {
+                            concatenatedInspectionData += text + " ";
+                        }
                     });
             }
+
+            // Limpeza final dos dados concatenados
+            const cleanedInspectionData = concatenatedInspectionData.trim();
 
             // Verifica se a página 2 existe ou não e concatena os dados, se existir
             const combinedReprovaData = (motivoReprovaData + " " + motivoReprovaNext + " " + page2ConcatenatedData).trim();
 
             // Combina os dados extraídos em uma única linha, incluindo a informação anterior ao "FINALIDADE:" na primeira coluna
-            return [fileName, finalidadeData, laudoNum, ...marcaModelo, ...motorNum, combinedReprovaData];
+            return [fileName, finalidadeData, laudoNum, ...marcaModelo, ...motorNum, cleanedInspectionData, combinedReprovaData];
         }
 
         // Função para gerar e baixar a planilha Excel
@@ -186,68 +207,41 @@
             const input = document.getElementById('pdfFiles');
             const files = input.files;
             if (!files.length) {
-                alert("Por favor, selecione ao menos um arquivo PDF!");
+                alert('Por favor, selecione pelo menos um arquivo PDF.');
                 return;
             }
 
-            // Exibe o modal
-            showLoadingModal();
+            showLoadingModal(); // Exibe o modal durante a conversão
 
-            let resultData = [];
+            const workbook = XLSX.utils.book_new();
+            const worksheetData = [];
 
-            // Adiciona os nomes das colunas na primeira linha
-            resultData.push(["Lote", "Laudo", "Resultado", "Placa", "Marca/Modelo", "Chassi", "Motor", "Motivo da Reprova"]);
+            // Cabeçalhos da planilha
+            worksheetData.push(["Arquivo", "Laudo", "Resultado", "Placa", "Marca/Modelo", "Chassi", "Motor", "Observações", "Motivo da Reprova"]);
 
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
-                let fileName = file.name; // Pega o nome do arquivo PDF
-
-                // Remove a extensão ".pdf" do nome do arquivo
-                fileName = fileName.replace(/\.pdf$/i, ""); // Remove ".pdf" do final, case insensitive
-
-                // Lê o arquivo PDF como um ArrayBuffer
-                const fileData = await file.arrayBuffer();
-
-                // Extrai os dados do PDF
-                const extractedData = await extractPdfData(fileData, fileName);
-
-                // Adiciona os dados extraídos à matriz resultData
-                resultData.push(extractedData);
+                const pdfData = await file.arrayBuffer();
+                const row = await extractPdfData(pdfData, file.name);
+                worksheetData.push(row);
             }
 
-            // Cria um novo workbook e uma nova sheet
-            const wb = XLSX.utils.book_new();
-            const ws = XLSX.utils.aoa_to_sheet(resultData);
-            XLSX.utils.book_append_sheet(wb, ws, "Dados PDFs");
+            const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Vistorias');
 
             // Gera o arquivo Excel
-            const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'binary' });
+            const excelData = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+            const blob = new Blob([excelData], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 
-            // Cria um blob com os dados do Excel
-            const blob = new Blob([s2ab(wbout)], { type: 'application/octet-stream' });
+            // Cria o link de download
             const url = URL.createObjectURL(blob);
-
-            // Exibir o link de download
             const downloadLink = document.getElementById('downloadLink');
             downloadLink.href = url;
-            downloadLink.download = 'dados_pdf.xlsx';
-            downloadLink.style.display = 'inline';
-            downloadLink.textContent = 'Clique aqui para baixar o arquivo Excel';
+            downloadLink.download = 'vistorias.xlsx';
+            downloadLink.style.display = 'block'; // Exibe o link
 
-            // Oculta o modal
-            hideLoadingModal();
-        }
-
-        // Função auxiliar para converter string para array buffer
-        function s2ab(s) {
-            const buf = new ArrayBuffer(s.length);
-            const view = new Uint8Array(buf);
-            for (let i = 0; i < s.length; i++) {
-                view[i] = s.charCodeAt(i) & 0xFF;
-            }
-            return buf;
+            hideLoadingModal(); // Oculta o modal após a conversão
         }
     </script>
-
 </body>
 </html>
