@@ -123,7 +123,10 @@
 
                         // Captura o primeiro dado após "LAUDO Nº:"
                         if (captureLaudo && laudoNum === "") {
-                            laudoNum = text;
+                            laudoNum = text;   
+                            if (laudoNum === "DATA/HORA :"){
+                                laudoNum = "AP C/ APONTAMENTOS"
+                            }                         
                             captureLaudo = false;
                         }
 
@@ -165,13 +168,13 @@
                         }
 
                         // Iniciar a concatenação dos dados da página 2 após "ITENS REPROVADOS"
-                        if (text === "ITENS REPROVADOS") {
+                        if (text === "ITENS REPROVADOS" || text ==="Item Observado") {
                             startConcatenation = true;
-                        }
+                        }                                     
 
                         // Concatenar todos os dados após "ITENS REPROVADOS" na página 2
                         if (pageNum === 2 && startConcatenation) {
-                            page2ConcatenatedData += text + " ";
+                            page2ConcatenatedData += text + " ";                            
                         }
 
                         // Iniciar captura dos itens entre "Resultado da vistoria..." e "LACRE"
